@@ -172,7 +172,7 @@ struct OverlayView: View {
 
     private var responseOutput: some View {
         ScrollView {
-            MarkdownResponseView(markdown: responseText, isPlaceholder: model.response.isEmpty)
+            MarkdownResponseView(markdown: responseText, isPlaceholder: model.isRunning || model.response.isEmpty)
                 .padding(12)
         }
     }
@@ -201,7 +201,7 @@ struct OverlayView: View {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(model.response.isEmpty)
+                .disabled(model.response.isEmpty || model.isRunning)
 
                 Button {
                     model.cancel()

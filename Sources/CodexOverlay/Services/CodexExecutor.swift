@@ -89,6 +89,7 @@ struct CodexExecutor: Sendable {
                     }
 
                     output.append(chunk)
+                    onOutput(chunk)
                 }
 
                 stdout.fileHandleForReading.readabilityHandler = { handle in
