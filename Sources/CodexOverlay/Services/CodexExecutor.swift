@@ -30,7 +30,7 @@ struct CodexExecutor: Sendable {
             throw CodexExecutorError.emptyPrompt
         }
 
-        guard let codexPath = resolveCodexPath() else {
+        guard let launchContext = resolveCodexLaunchContext() else {
             throw CodexExecutorError.executableNotFound
         }
 
@@ -38,7 +38,7 @@ struct CodexExecutor: Sendable {
             .appendingPathComponent("codex-overlay-\(UUID().uuidString).txt")
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: codexPath)
+        process.executableURL = URL(fileURLWithPath: launchContext.executablePath)
         var arguments = [
             "exec",
             "--ephemeral",
@@ -67,8 +67,12 @@ struct CodexExecutor: Sendable {
         arguments.append(trimmedPrompt)
         process.arguments = arguments
 
-        let environment = ProcessInfo.processInfo.environment
-        process.environment = environment.merging(["TERM": "xterm-256color"]) { _, new in new }
+        var environment = ProcessInfo.processInfo.environment
+        environment["TERM"] = "xterm-256color"
+        if let pathEnvironment = launchContext.pathEnvironment {
+            environment["PATH"] = pathEnvironment
+        }
+        process.environment = environment
 
         let stdout = Pipe()
         let stderr = Pipe()
@@ -131,11 +135,12 @@ struct CodexExecutor: Sendable {
         }
     }
 
-    private func resolveCodexPath() -> String? {
+    private func resolveCodexLaunchContext() -> CodexLaunchContext? {
         let environment = ProcessInfo.processInfo.environment
+        let shellPath = resolveFromLoginShell(command: "printf '%s\\n' \"$PATH\"")
 
         if let configured = environment["CODEX_EXECUTABLE"], FileManager.default.isExecutableFile(atPath: configured) {
-            return configured
+            return CodexLaunchContext(executablePath: configured, pathEnvironment: shellPath)
         }
 
         for path in [
@@ -143,16 +148,20 @@ struct CodexExecutor: Sendable {
             "/usr/local/bin/codex",
             "\(NSHomeDirectory())/.local/bin/codex"
         ] where FileManager.default.isExecutableFile(atPath: path) {
-            return path
+            return CodexLaunchContext(executablePath: path, pathEnvironment: shellPath)
         }
 
-        return resolveFromLoginShell()
+        guard let shellCodexPath = resolveFromLoginShell(command: "command -v codex") else {
+            return nil
+        }
+
+        return CodexLaunchContext(executablePath: shellCodexPath, pathEnvironment: shellPath)
     }
 
-    private func resolveFromLoginShell() -> String? {
+    private func resolveFromLoginShell(command: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", "command -v codex"]
+        process.arguments = ["-ilc", command]
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -169,16 +178,16 @@ struct CodexExecutor: Sendable {
             return nil
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let path = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let path, FileManager.default.isExecutableFile(atPath: path) else {
-            return nil
-        }
-
-        return path
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .last { !$0.isEmpty }
     }
+}
+
+private struct CodexLaunchContext {
+    let executablePath: String
+    let pathEnvironment: String?
 }
 
 private final class ProcessOutput: @unchecked Sendable {
