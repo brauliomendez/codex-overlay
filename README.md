@@ -31,6 +31,21 @@ Useful commands:
 pkill -x CodexOverlay
 ```
 
+Optional shell alias:
+
+```bash
+alias overlay='/path/to/codex-overlay/script/build_and_run.sh'
+```
+
+With that alias loaded, run:
+
+```bash
+overlay
+```
+
+The script changes into the repo root before building, so the alias can be run
+from any directory.
+
 ## Usage
 
 - `Option Space`: show or hide the overlay.
@@ -55,3 +70,47 @@ For another technical user, share the repo and have them run:
 
 For normal distribution, the next step is signing, notarization, icon/app metadata,
 and packaging.
+
+## Login Startup
+
+For day-to-day development, the simplest approach is a shell alias and launching
+the app manually from Terminal.
+
+If automatic startup is needed later, create:
+
+```text
+~/Library/LaunchAgents/com.brauliomendez.codex-overlay.dev.plist
+```
+
+with:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.brauliomendez.codex-overlay.dev</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/path/to/codex-overlay/script/build_and_run.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>/path/to/codex-overlay</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/codex-overlay-dev.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/codex-overlay-dev.err.log</string>
+  </dict>
+</plist>
+```
+
+Load it with:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.brauliomendez.codex-overlay.dev.plist
+launchctl enable gui/$(id -u)/com.brauliomendez.codex-overlay.dev
+launchctl kickstart -k gui/$(id -u)/com.brauliomendez.codex-overlay.dev
+```
