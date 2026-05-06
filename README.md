@@ -2,6 +2,10 @@
 
 Small macOS overlay for sending one-shot prompts to `codex exec` from a global shortcut.
 
+## Demo
+
+![Codex Overlay demo](assets/demo.gif)
+
 ## Requirements
 
 - macOS 14 or newer.
