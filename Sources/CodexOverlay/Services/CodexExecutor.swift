@@ -41,6 +41,7 @@ struct CodexExecutor: Sendable {
         process.executableURL = URL(fileURLWithPath: launchContext.executablePath)
         var arguments = [
             "exec",
+            "--json",
             "--ephemeral",
             "--color",
             "never",
@@ -82,6 +83,7 @@ struct CodexExecutor: Sendable {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let output = ProcessOutput()
+                let streamFormatter = CodexStreamFormatter()
 
                 let append: @Sendable (Data) -> Void = { data in
                     guard let chunk = String(data: data, encoding: .utf8), !chunk.isEmpty else {
@@ -89,7 +91,9 @@ struct CodexExecutor: Sendable {
                     }
 
                     output.append(chunk)
-                    onOutput(chunk)
+                    if let displayText = streamFormatter.append(chunk) {
+                        onOutput(displayText)
+                    }
                 }
 
                 stdout.fileHandleForReading.readabilityHandler = { handle in
@@ -183,6 +187,95 @@ struct CodexExecutor: Sendable {
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .last { !$0.isEmpty }
+    }
+}
+
+private final class CodexStreamFormatter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending = ""
+    private var emittedMessages: Set<String> = []
+
+    func append(_ chunk: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        pending += chunk
+        let lines = pending.components(separatedBy: .newlines)
+        pending = lines.last ?? ""
+
+        let messages = lines.dropLast().compactMap(formatLine)
+        guard !messages.isEmpty else {
+            return nil
+        }
+
+        return messages.joined(separator: "\n\n") + "\n\n"
+    }
+
+    private func formatLine(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8) else {
+            return nil
+        }
+
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
+            return nil
+        }
+
+        switch type {
+        case "turn.started":
+            return once("Thinking...")
+
+        case "turn.completed":
+            return once("Finalizing...")
+
+        case "item.started":
+            guard let item = object["item"] as? [String: Any] else {
+                return nil
+            }
+
+            if item["type"] as? String == "command_execution", let command = item["command"] as? String {
+                return "Running command:\n`\(command)`"
+            }
+
+            return nil
+
+        case "item.completed":
+            guard let item = object["item"] as? [String: Any], let itemType = item["type"] as? String else {
+                return nil
+            }
+
+            if itemType == "command_execution", let command = item["command"] as? String {
+                let output = (item["aggregated_output"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if let output, !output.isEmpty {
+                    return "Command finished:\n`\(command)`\n\n```text\n\(output)\n```"
+                }
+
+                return "Command finished:\n`\(command)`"
+            }
+
+            if itemType == "agent_message" {
+                return once("Writing final response...")
+            }
+
+            return nil
+
+        default:
+            return nil
+        }
+    }
+
+    private func once(_ message: String) -> String? {
+        guard !emittedMessages.contains(message) else {
+            return nil
+        }
+
+        emittedMessages.insert(message)
+        return message
     }
 }
 
