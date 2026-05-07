@@ -3,6 +3,7 @@ import SwiftUI
 struct OverlayView: View {
     @EnvironmentObject private var model: OverlayViewModel
     @FocusState private var promptFocused: Bool
+    @State private var keyMonitor: Any?
 
     let onClose: () -> Void
 
@@ -34,6 +35,12 @@ struct OverlayView: View {
         }
         .onExitCommand {
             onClose()
+        }
+        .onAppear {
+            installKeyMonitorIfNeeded()
+        }
+        .onDisappear {
+            removeKeyMonitor()
         }
         .onChange(of: model.isShowingResponse) { _, isShowingResponse in
             if !isShowingResponse {
@@ -228,5 +235,45 @@ struct OverlayView: View {
 
             Spacer()
         }
+    }
+
+    private func installKeyMonitorIfNeeded() {
+        guard keyMonitor == nil else {
+            return
+        }
+
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard promptFocused, !model.isShowingResponse, !model.isRunning else {
+                return event
+            }
+
+            guard event.keyCode == 36 || event.keyCode == 76 else {
+                return event
+            }
+
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if modifiers.contains(.shift) {
+                return event
+            }
+
+            if modifiers.isDisjoint(with: [.option, .control, .function]) {
+                let prompt = model.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !prompt.isEmpty {
+                    model.runPrompt()
+                    return nil
+                }
+            }
+
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        guard let keyMonitor else {
+            return
+        }
+
+        NSEvent.removeMonitor(keyMonitor)
+        self.keyMonitor = nil
     }
 }
